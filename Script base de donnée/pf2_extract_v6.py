@@ -396,6 +396,543 @@ def extract_journal_entries() -> List[dict]:
     return entries
 
 
+def extract_traits() -> List[dict]:
+    """Extrait les traits depuis les fichiers de langue."""
+    entries = []
+    
+    # Chemins des fichiers de langue
+    fr_file = RAW_DIR / "pf2-fr" / "lang" / "fr.json"
+    en_file = RAW_DIR / "pf2e" / "static" / "lang" / "en.json"
+    
+    if not fr_file.exists():
+        log(f"Fichier de langue FR non trouvé: {fr_file}", "warn")
+        return entries
+    
+    if not en_file.exists():
+        log(f"Fichier de langue EN non trouvé: {en_file}", "warn")
+        return entries
+    
+    log("Extraction des traits depuis les fichiers de langue...", "info")
+    
+    # Charger les fichiers JSON
+    try:
+        with open(fr_file, 'r', encoding='utf-8') as f:
+            fr_data = json.load(f)
+        with open(en_file, 'r', encoding='utf-8') as f:
+            en_data = json.load(f)
+    except Exception as e:
+        log(f"Erreur chargement fichiers de langue: {e}", "err")
+        return entries
+    
+    # Extraire les traits FR (dans PF2E.TraitDescriptionXxx)
+    fr_traits = {}
+    if "PF2E" in fr_data:
+        for key, value in fr_data["PF2E"].items():
+            if key.startswith("TraitDescription") and isinstance(value, str):
+                trait_name = key[len("TraitDescription"):]  # Enlever le préfixe
+                fr_traits[trait_name.lower()] = {
+                    "name": trait_name,
+                    "description": value
+                }
+    
+    # Extraire les traits EN (dans PF2E.TraitDescriptionXxx)
+    en_traits = {}
+    if "PF2E" in en_data:
+        for key, value in en_data["PF2E"].items():
+            if key.startswith("TraitDescription") and isinstance(value, str):
+                trait_name = key[len("TraitDescription"):]
+                en_traits[trait_name.lower()] = {
+                    "name": trait_name,
+                    "description": value
+                }
+    
+    # Aussi chercher les labels des traits (TraitXxx pour le nom affiché)
+    fr_labels = {}
+    en_labels = {}
+    if "PF2E" in fr_data:
+        for key, value in fr_data["PF2E"].items():
+            if key.startswith("Trait") and not key.startswith("TraitDescription") and isinstance(value, str):
+                trait_key = key[len("Trait"):].lower()
+                fr_labels[trait_key] = value
+    
+    if "PF2E" in en_data:
+        for key, value in en_data["PF2E"].items():
+            if key.startswith("Trait") and not key.startswith("TraitDescription") and isinstance(value, str):
+                trait_key = key[len("Trait"):].lower()
+                en_labels[trait_key] = value
+    
+    # Combiner FR et EN
+    all_trait_keys = set(fr_traits.keys()) | set(en_traits.keys())
+    
+    for trait_key in all_trait_keys:
+        fr_info = fr_traits.get(trait_key, {})
+        en_info = en_traits.get(trait_key, {})
+        
+        # Nom du trait (utiliser le label si disponible, sinon le nom de la clé)
+        name_fr = fr_labels.get(trait_key, fr_info.get("name", trait_key.capitalize()))
+        name_en = en_labels.get(trait_key, en_info.get("name", trait_key.capitalize()))
+        
+        desc_fr = fr_info.get("description", "")
+        desc_en = en_info.get("description", "")
+        
+        entry = {
+            "_id": trait_key,
+            "_pack": "traits",
+            "_pack_type": "trait",
+            "_source": "pf2-fr+pf2e",
+            "_translated": bool(desc_fr),
+            "name": name_fr or name_en,
+            "name_fr": name_fr or name_en,
+            "name_en": name_en or name_fr,
+            "description_fr": desc_fr,
+            "type": "trait",
+            "system": {
+                "description": {"value": desc_en or desc_fr}
+            }
+        }
+        
+        entries.append(entry)
+    
+    log(f"  {len(entries)} traits extraits", "ok")
+    return entries
+
+
+def extract_npc_abilities() -> List[dict]:
+    """Extrait les capacités de PNJ (glossaire) depuis les fichiers de langue."""
+    entries = []
+    
+    fr_file = RAW_DIR / "pf2-fr" / "lang" / "fr.json"
+    en_file = RAW_DIR / "pf2e" / "static" / "lang" / "en.json"
+    
+    if not fr_file.exists() or not en_file.exists():
+        log("Fichiers de langue non trouvés pour capacités NPC", "warn")
+        return entries
+    
+    log("Extraction des capacités NPC (glossaire)...", "info")
+    
+    try:
+        with open(fr_file, 'r', encoding='utf-8') as f:
+            fr_data = json.load(f)
+        with open(en_file, 'r', encoding='utf-8') as f:
+            en_data = json.load(f)
+    except Exception as e:
+        log(f"Erreur chargement fichiers de langue: {e}", "err")
+        return entries
+    
+    # Extraire le glossaire des capacités NPC
+    fr_glossary = fr_data.get("PF2E", {}).get("NPC", {}).get("Abilities", {}).get("Glossary", {})
+    en_glossary = en_data.get("PF2E", {}).get("NPC", {}).get("Abilities", {}).get("Glossary", {})
+    
+    # Aussi les AttackEffect pour les noms traduits (Grab -> Agrippement, etc.)
+    fr_attack_effects = {}
+    en_attack_effects = {}
+    for k, v in fr_data.get("PF2E", {}).items():
+        if k.startswith("AttackEffect") and isinstance(v, str):
+            key = k[len("AttackEffect"):].lower()
+            fr_attack_effects[key] = v
+    for k, v in en_data.get("PF2E", {}).items():
+        if k.startswith("AttackEffect") and isinstance(v, str):
+            key = k[len("AttackEffect"):].lower()
+            en_attack_effects[key] = v
+    
+    all_keys = set(fr_glossary.keys()) | set(en_glossary.keys())
+    
+    for key in all_keys:
+        desc_fr = fr_glossary.get(key, "")
+        desc_en = en_glossary.get(key, "")
+        
+        # Chercher le nom traduit dans AttackEffect ou utiliser la clé
+        name_fr = fr_attack_effects.get(key.lower(), key)
+        name_en = en_attack_effects.get(key.lower(), key)
+        
+        entry = {
+            "_id": f"npc-ability-{key.lower()}",
+            "_pack": "npc-abilities",
+            "_pack_type": "capacité",
+            "_source": "pf2-fr+pf2e",
+            "_translated": bool(desc_fr),
+            "name": name_fr or name_en,
+            "name_fr": name_fr or name_en,
+            "name_en": name_en or name_fr,
+            "description_fr": desc_fr,
+            "type": "capacité",
+            "system": {
+                "description": {"value": desc_en or desc_fr}
+            }
+        }
+        entries.append(entry)
+    
+    log(f"  {len(entries)} capacités NPC extraites", "ok")
+    return entries
+
+
+def extract_conditions() -> List[dict]:
+    """Extrait les états/conditions depuis les fichiers de langue."""
+    entries = []
+    
+    fr_file = RAW_DIR / "pf2-fr" / "lang" / "fr.json"
+    en_file = RAW_DIR / "pf2e" / "static" / "lang" / "en.json"
+    
+    if not fr_file.exists() or not en_file.exists():
+        log("Fichiers de langue non trouvés pour conditions", "warn")
+        return entries
+    
+    log("Extraction des états/conditions...", "info")
+    
+    try:
+        with open(fr_file, 'r', encoding='utf-8') as f:
+            fr_data = json.load(f)
+        with open(en_file, 'r', encoding='utf-8') as f:
+            en_data = json.load(f)
+    except Exception as e:
+        log(f"Erreur chargement fichiers de langue: {e}", "err")
+        return entries
+    
+    # Extraire les conditions (ConditionTypeXxx)
+    fr_conditions = {}
+    en_conditions = {}
+    
+    for k, v in fr_data.get("PF2E", {}).items():
+        if k.startswith("ConditionType") and isinstance(v, str):
+            cond_key = k[len("ConditionType"):].lower()
+            fr_conditions[cond_key] = v
+    
+    for k, v in en_data.get("PF2E", {}).items():
+        if k.startswith("ConditionType") and isinstance(v, str):
+            cond_key = k[len("ConditionType"):].lower()
+            en_conditions[cond_key] = v
+    
+    all_keys = set(fr_conditions.keys()) | set(en_conditions.keys())
+    
+    for key in all_keys:
+        name_fr = fr_conditions.get(key, "")
+        name_en = en_conditions.get(key, "")
+        
+        # Note: Les descriptions des conditions sont dans les items du compendium conditionitems
+        # Ici on extrait juste les noms traduits comme référence rapide
+        entry = {
+            "_id": f"condition-{key}",
+            "_pack": "conditions",
+            "_pack_type": "état",
+            "_source": "pf2-fr+pf2e",
+            "_translated": bool(name_fr),
+            "name": name_fr or name_en,
+            "name_fr": name_fr or name_en,
+            "name_en": name_en or name_fr,
+            "description_fr": "",  # Descriptions dans les items du compendium
+            "type": "état",
+            "system": {
+                "description": {"value": ""}
+            }
+        }
+        entries.append(entry)
+    
+    log(f"  {len(entries)} états/conditions extraits", "ok")
+    return entries
+
+
+def extract_materials() -> List[dict]:
+    """Extrait les matériaux précieux depuis les fichiers de langue."""
+    entries = []
+    
+    fr_file = RAW_DIR / "pf2-fr" / "lang" / "fr.json"
+    en_file = RAW_DIR / "pf2e" / "static" / "lang" / "en.json"
+    
+    if not fr_file.exists() or not en_file.exists():
+        log("Fichiers de langue non trouvés pour matériaux", "warn")
+        return entries
+    
+    log("Extraction des matériaux précieux...", "info")
+    
+    try:
+        with open(fr_file, 'r', encoding='utf-8') as f:
+            fr_data = json.load(f)
+        with open(en_file, 'r', encoding='utf-8') as f:
+            en_data = json.load(f)
+    except Exception as e:
+        log(f"Erreur chargement fichiers de langue: {e}", "err")
+        return entries
+    
+    # Extraire les noms et descriptions des matériaux précieux
+    fr_names = {}
+    fr_descs = {}
+    en_names = {}
+    en_descs = {}
+    
+    for k, v in fr_data.get("PF2E", {}).items():
+        if k.startswith("PreciousMaterial") and isinstance(v, str):
+            if "Description" in k:
+                mat_key = k[len("PreciousMaterial"):-len("Description")].lower()
+                fr_descs[mat_key] = v
+            elif "Grade" not in k and "Label" not in k:
+                mat_key = k[len("PreciousMaterial"):].lower()
+                fr_names[mat_key] = v
+    
+    for k, v in en_data.get("PF2E", {}).items():
+        if k.startswith("PreciousMaterial") and isinstance(v, str):
+            if "Description" in k:
+                mat_key = k[len("PreciousMaterial"):-len("Description")].lower()
+                en_descs[mat_key] = v
+            elif "Grade" not in k and "Label" not in k:
+                mat_key = k[len("PreciousMaterial"):].lower()
+                en_names[mat_key] = v
+    
+    # Ne garder que les matériaux qui ont une description
+    all_keys = set(fr_descs.keys()) | set(en_descs.keys())
+    
+    for key in all_keys:
+        name_fr = fr_names.get(key, key.capitalize())
+        name_en = en_names.get(key, key.capitalize())
+        desc_fr = fr_descs.get(key, "")
+        desc_en = en_descs.get(key, "")
+        
+        entry = {
+            "_id": f"material-{key}",
+            "_pack": "materials",
+            "_pack_type": "matériau",
+            "_source": "pf2-fr+pf2e",
+            "_translated": bool(desc_fr),
+            "name": name_fr or name_en,
+            "name_fr": name_fr or name_en,
+            "name_en": name_en or name_fr,
+            "description_fr": desc_fr,
+            "type": "matériau",
+            "system": {
+                "description": {"value": desc_en or desc_fr}
+            }
+        }
+        entries.append(entry)
+    
+    log(f"  {len(entries)} matériaux précieux extraits", "ok")
+    return entries
+
+
+def extract_glossary() -> List[dict]:
+    """Extrait les termes génériques du glossaire depuis les fichiers de langue."""
+    entries = []
+    
+    fr_file = RAW_DIR / "pf2-fr" / "lang" / "fr.json"
+    en_file = RAW_DIR / "pf2e" / "static" / "lang" / "en.json"
+    
+    if not fr_file.exists() or not en_file.exists():
+        log("Fichiers de langue non trouvés pour glossaire", "warn")
+        return entries
+    
+    log("Extraction du glossaire général...", "info")
+    
+    try:
+        with open(fr_file, 'r', encoding='utf-8') as f:
+            fr_data = json.load(f)
+        with open(en_file, 'r', encoding='utf-8') as f:
+            en_data = json.load(f)
+    except Exception as e:
+        log(f"Erreur chargement fichiers de langue: {e}", "err")
+        return entries
+    
+    fr_pf2e = fr_data.get("PF2E", {})
+    en_pf2e = en_data.get("PF2E", {})
+    
+    # Définir les catégories à extraire
+    categories = {
+        "ActorSize": ("taille", "Taille"),
+        "ProficiencyLevel": ("maîtrise", "Niveau de maîtrise"),
+        "DCAdjustment": ("dd", "Ajustement DD"),
+        "ActionType": ("type-action", "Type d'action"),
+        "PreparationType": ("préparation", "Type de préparation"),
+        "WeaponGroup": ("groupe-arme", "Groupe d'armes"),
+        "ArmorGroup": ("groupe-armure", "Groupe d'armures"),
+        "WeaponType": ("type-arme", "Type d'arme"),
+        "ArmorType": ("type-armure", "Type d'armure"),
+        "Currency": ("devise", "Devise"),
+    }
+    
+    # Extraire les clés simples (string values)
+    for prefix, (id_prefix, category_label) in categories.items():
+        fr_items = {k: v for k, v in fr_pf2e.items() 
+                    if k.startswith(prefix) and isinstance(v, str)
+                    and "Label" not in k and "Header" not in k and "Title" not in k}
+        en_items = {k: v for k, v in en_pf2e.items() 
+                    if k.startswith(prefix) and isinstance(v, str)
+                    and "Label" not in k and "Header" not in k and "Title" not in k}
+        
+        all_keys = set(fr_items.keys()) | set(en_items.keys())
+        
+        for key in all_keys:
+            # Extraire le suffixe (ex: "ActorSizeLarge" -> "Large")
+            suffix = key[len(prefix):]
+            if not suffix:
+                continue
+                
+            name_fr = fr_items.get(key, "")
+            name_en = en_items.get(key, "")
+            
+            if not name_fr and not name_en:
+                continue
+            
+            entry = {
+                "_id": f"glossaire-{id_prefix}-{suffix.lower()}",
+                "_pack": "glossaire",
+                "_pack_type": "glossaire",
+                "_source": "pf2-fr+pf2e",
+                "_translated": bool(name_fr),
+                "name": name_fr or name_en,
+                "name_fr": name_fr or name_en,
+                "name_en": name_en or name_fr,
+                "description_fr": f"Catégorie: {category_label}",
+                "type": "glossaire",
+                "glossary_category": category_label,
+                "system": {
+                    "description": {"value": f"Category: {category_label}"}
+                }
+            }
+            entries.append(entry)
+    
+    # Extraire les compétences (Skill dict)
+    fr_skills = fr_pf2e.get("Skill", {})
+    en_skills = en_pf2e.get("Skill", {})
+    if isinstance(fr_skills, dict) and isinstance(en_skills, dict):
+        all_skill_keys = set(fr_skills.keys()) | set(en_skills.keys())
+        for key in all_skill_keys:
+            fr_val = fr_skills.get(key, "")
+            en_val = en_skills.get(key, "")
+            if isinstance(fr_val, str) and isinstance(en_val, str):
+                entry = {
+                    "_id": f"glossaire-compétence-{key.lower()}",
+                    "_pack": "glossaire",
+                    "_pack_type": "glossaire",
+                    "_source": "pf2-fr+pf2e",
+                    "_translated": bool(fr_val),
+                    "name": fr_val or en_val,
+                    "name_fr": fr_val or en_val,
+                    "name_en": en_val or fr_val,
+                    "description_fr": "Catégorie: Compétence",
+                    "type": "glossaire",
+                    "glossary_category": "Compétence",
+                    "system": {
+                        "description": {"value": "Category: Skill"}
+                    }
+                }
+                entries.append(entry)
+    
+    # Extraire les types de dégâts (Damage.IWR.Type)
+    fr_damage = fr_pf2e.get("Damage", {})
+    en_damage = en_pf2e.get("Damage", {})
+    if isinstance(fr_damage, dict) and isinstance(en_damage, dict):
+        fr_types = fr_damage.get("IWR", {}).get("Type", {}) if isinstance(fr_damage.get("IWR"), dict) else {}
+        en_types = en_damage.get("IWR", {}).get("Type", {}) if isinstance(en_damage.get("IWR"), dict) else {}
+        
+        all_damage_keys = set(fr_types.keys()) | set(en_types.keys())
+        for key in all_damage_keys:
+            fr_val = fr_types.get(key, "")
+            en_val = en_types.get(key, "")
+            if fr_val or en_val:
+                entry = {
+                    "_id": f"glossaire-dégât-{key.lower()}",
+                    "_pack": "glossaire",
+                    "_pack_type": "glossaire",
+                    "_source": "pf2-fr+pf2e",
+                    "_translated": bool(fr_val),
+                    "name": fr_val or en_val,
+                    "name_fr": fr_val or en_val,
+                    "name_en": en_val or fr_val,
+                    "description_fr": "Catégorie: Type de dégât/immunité/résistance",
+                    "type": "glossaire",
+                    "glossary_category": "Type de dégât",
+                    "system": {
+                        "description": {"value": "Category: Damage/IWR Type"}
+                    }
+                }
+                entries.append(entry)
+    
+    # Extraire les formes de zone (Area.Shape)
+    fr_area = fr_pf2e.get("Area", {})
+    en_area = en_pf2e.get("Area", {})
+    if isinstance(fr_area, dict) and isinstance(en_area, dict):
+        fr_shapes = fr_area.get("Shape", {}) if isinstance(fr_area.get("Shape"), dict) else {}
+        en_shapes = en_area.get("Shape", {}) if isinstance(en_area.get("Shape"), dict) else {}
+        
+        all_shape_keys = set(fr_shapes.keys()) | set(en_shapes.keys())
+        for key in all_shape_keys:
+            fr_val = fr_shapes.get(key, "")
+            en_val = en_shapes.get(key, "")
+            if fr_val or en_val:
+                entry = {
+                    "_id": f"glossaire-zone-{key.lower()}",
+                    "_pack": "glossaire",
+                    "_pack_type": "glossaire",
+                    "_source": "pf2-fr+pf2e",
+                    "_translated": bool(fr_val),
+                    "name": fr_val or en_val,
+                    "name_fr": fr_val or en_val,
+                    "name_en": en_val or fr_val,
+                    "description_fr": "Catégorie: Forme de zone",
+                    "type": "glossaire",
+                    "glossary_category": "Forme de zone",
+                    "system": {
+                        "description": {"value": "Category: Area Shape"}
+                    }
+                }
+                entries.append(entry)
+    
+    # Extraire les durées (Duration dict)
+    fr_duration = fr_pf2e.get("Duration", {})
+    en_duration = en_pf2e.get("Duration", {})
+    if isinstance(fr_duration, dict) and isinstance(en_duration, dict):
+        all_dur_keys = set(fr_duration.keys()) | set(en_duration.keys())
+        for key in all_dur_keys:
+            fr_val = fr_duration.get(key, "")
+            en_val = en_duration.get(key, "")
+            if isinstance(fr_val, str) and isinstance(en_val, str):
+                entry = {
+                    "_id": f"glossaire-durée-{key.lower()}",
+                    "_pack": "glossaire",
+                    "_pack_type": "glossaire",
+                    "_source": "pf2-fr+pf2e",
+                    "_translated": bool(fr_val),
+                    "name": fr_val or en_val,
+                    "name_fr": fr_val or en_val,
+                    "name_en": en_val or fr_val,
+                    "description_fr": "Catégorie: Durée",
+                    "type": "glossaire",
+                    "glossary_category": "Durée",
+                    "system": {
+                        "description": {"value": "Category: Duration"}
+                    }
+                }
+                entries.append(entry)
+    
+    # Extraire les jets de sauvegarde
+    saves_mapping = {
+        "SavesFortitude": "Vigueur",
+        "SavesReflex": "Réflexes",
+        "SavesWill": "Volonté",
+    }
+    for key, default_fr in saves_mapping.items():
+        fr_val = fr_pf2e.get(key, "")
+        en_val = en_pf2e.get(key, "")
+        if fr_val or en_val:
+            entry = {
+                "_id": f"glossaire-sauvegarde-{key.replace('Saves', '').lower()}",
+                "_pack": "glossaire",
+                "_pack_type": "glossaire",
+                "_source": "pf2-fr+pf2e",
+                "_translated": bool(fr_val),
+                "name": fr_val or en_val,
+                "name_fr": fr_val or default_fr,
+                "name_en": en_val or key.replace('Saves', ''),
+                "description_fr": "Catégorie: Jet de sauvegarde",
+                "type": "glossaire",
+                "glossary_category": "Jet de sauvegarde",
+                "system": {
+                    "description": {"value": "Category: Saving Throw"}
+                }
+            }
+            entries.append(entry)
+    
+    log(f"  {len(entries)} entrées de glossaire extraites", "ok")
+    return entries
+
+
 def load_all_translations() -> Tuple[Dict[str, Translation], Dict[str, str]]:
     """Charge toutes les traductions depuis les fichiers .htm."""
     translations = {}  # Clé = UUID
@@ -718,6 +1255,36 @@ def main():
         entries.append(je)
         pack_type = je.get("_pack_type", "règle")
         stats[pack_type] = stats.get(pack_type, 0) + 1
+    
+    # Ajouter les traits depuis les fichiers de langue
+    trait_entries = extract_traits()
+    for te in trait_entries:
+        entries.append(te)
+        stats["trait"] = stats.get("trait", 0) + 1
+    
+    # Ajouter les capacités NPC (glossaire)
+    npc_ability_entries = extract_npc_abilities()
+    for ae in npc_ability_entries:
+        entries.append(ae)
+        stats["capacité"] = stats.get("capacité", 0) + 1
+    
+    # Ajouter les états/conditions
+    condition_entries = extract_conditions()
+    for ce in condition_entries:
+        entries.append(ce)
+        stats["état"] = stats.get("état", 0) + 1
+    
+    # Ajouter les matériaux précieux
+    material_entries = extract_materials()
+    for me in material_entries:
+        entries.append(me)
+        stats["matériau"] = stats.get("matériau", 0) + 1
+    
+    # Ajouter le glossaire général
+    glossary_entries = extract_glossary()
+    for ge in glossary_entries:
+        entries.append(ge)
+        stats["glossaire"] = stats.get("glossaire", 0) + 1
     
     print()
     

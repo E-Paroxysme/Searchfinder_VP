@@ -286,7 +286,8 @@ def display_full(entry: dict):
         "classe": "Classe", "archétype": "Archétype", "divinité": "Divinité",
         "état": "État", "effet": "Effet", "compagnon": "Compagnon",
         "familier": "Familier", "véhicule": "Véhicule", "trésor": "Trésor",
-        "règle": "Règle", "domaine": "Domaine",
+        "règle": "Règle", "domaine": "Domaine", "trait": "Trait",
+        "capacité": "Capacité", "matériau": "Matériau", "glossaire": "Glossaire",
     }
     type_label = type_display.get(pack_type, pack_type.capitalize() if pack_type else "")
     
@@ -352,6 +353,21 @@ def display_full(entry: dict):
 
 def display_creature_full(system: dict, items: list, w: int):
     """Stats complètes d'une créature."""
+    
+    # === TAILLE ===
+    size_map = {
+        "tiny": "Très petite (TP)",
+        "sm": "Petite (P)",
+        "med": "Moyenne (M)",
+        "lg": "Grande (G)",
+        "huge": "Très grande (TG)",
+        "grg": "Gargantuesque (Gar)"
+    }
+    traits = system.get("traits", {})
+    size_value = traits.get("size", {}).get("value", "") if isinstance(traits, dict) else ""
+    if size_value:
+        size_label = size_map.get(size_value, size_value.capitalize())
+        print(f"   {C.GREEN}Taille{C.RESET} {size_label}")
     
     # === PERCEPTION & SENS ===
     perception = system.get("perception", {})
@@ -1175,6 +1191,10 @@ TYPE_SHORTCUTS = {
     "classe:": "classe", "class:": "classe",
     "compagnon:": "compagnon", "companion:": "compagnon",
     "règle:": "règle", "regle:": "règle", "rule:": "règle",
+    "traitdef:": "trait", "définition:": "trait",  # Pour chercher la définition d'un trait
+    "capacité:": "capacité", "ability:": "capacité", "npca:": "capacité",  # Capacités NPC
+    "matériau:": "matériau", "materiau:": "matériau", "material:": "matériau",  # Matériaux précieux
+    "glossaire:": "glossaire", "gloss:": "glossaire", "ref:": "glossaire",  # Glossaire général
 }
 
 def interactive(conn: sqlite3.Connection):
@@ -1182,7 +1202,8 @@ def interactive(conn: sqlite3.Connection):
     print(f"\n{C.BOLD}🔍 PF2e Search v5{C.RESET}")
     print(f"{C.DIM}   Commandes: q=quitter, stats, types, packs, traits")
     print(f"   <num>=détails, full <num>=complet")
-    print(f"   Filtres: créature: sort: pack:bestiary trait:magus{C.RESET}")
+    print(f"   Filtres: créature: sort: pack:bestiary trait:magus")
+    print(f"   Nouveaux: capacité: matériau: traitdef:{C.RESET}")
     print()
     
     last_results = []
